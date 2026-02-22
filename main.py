@@ -1165,8 +1165,38 @@ async def verify_face(
     confidence = round(max(0.0, 100 - (distance * 5)), 2)
     CONFIDENCE_THRESHOLD = 50
     matched = confidence >= CONFIDENCE_THRESHOLD
+    # Inside /api/verify-face, right before return jsonify(...)
+    if not matched and record:
+        from utils.anomaly_detector import smart_fraud_check
+        from utils.reputation_utils import update_score
 
-    return {
+        fraud_result = smart_fraud_check(
+            wallet_address,
+            distance,
+            request.form.get('venue', 'Unknown')
+        )
+
+        if fraud_result["action"] == "AUTO_FLAG":
+            db.flags.insert_one({
+                "wallet": wallet_address,
+                "type": "FACE_MISMATCH",
+                "mismatch_distance": round(distance, 4),
+                "risk_score": fraud_result["risk_score"],
+                "venue": request.form.get('venue', 'Unknown'),
+                "timestamp": int(time.time()),
+                "status": "pending_dao",
+            })
+
+        elif fraud_result["action"] == "SOFT_FLAG":
+            db.flags.insert_one({
+                "wallet": wallet_address,
+                "type": "SOFT_MISMATCH",
+                "mismatch_distance": round(distance, 4),
+                "risk_score": fraud_result["risk_score"],
+                "timestamp": int(time.time()),
+                "status": "monitoring",
+            })
+        return {
         "matched": matched,
         "confidence": confidence,
         "raw_distance": round(distance, 2),
